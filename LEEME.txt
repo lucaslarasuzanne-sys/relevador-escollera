@@ -1,2 +1,2 @@
-Relevador de Escollera Data (versión e2d90b889d7f). Lo arma herramientas/armar-relevador.js; no editar a mano.
+Relevador de Escollera Data (versión 101fc04061d8). Lo arma herramientas/armar-relevador.js; no editar a mano.
 Se publica tal cual (por ejemplo en GitHub Pages). No tiene datos: las zonas se cargan desde un archivo que arma el panel.

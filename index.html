@@ -265,7 +265,10 @@ label{display:block;margin:8px 0 4px;color:var(--dim);font-size:14px;}
   const modoTxt = ()=> S.modo === 'completo' ? 'modo completo' : 'modo rápido';
   // ---------- mapa (SVG, sin mosaicos) ----------
   function encuadrar(){
-    const pts = S.Z.tramos.flatMap(t=> t.c); if(!pts.length) return;
+    // sin calles (el panel no las pudo bajar), se encuadra con el contorno de la zona
+    let pts = S.Z.tramos.flatMap(t=> t.c);
+    if(!pts.length) pts = (S.Z.contorno.features || []).flatMap(f=> f.geometry.coordinates[0].map(([lon, lat])=> [lat, lon]));
+    if(!pts.length) return;
     const xs = pts.map(p=> p[1]*KX), ys = pts.map(p=> -p[0]*KY), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
     S.vista = { x: x0 - 40, y: y0 - 40, w: x1 - x0 + 80, h: y1 - y0 + 80 };
   }
@@ -411,6 +414,7 @@ label{display:block;margin:8px 0 4px;color:var(--dim);font-size:14px;}
   }
   // tramo: vacancia (+ local, + vacío) y, en modo completo, caminabilidad
   function hojaTramo(id){
+    if(!S.Z.tramos.length){ avisar('Este archivo de zona no trae las calles: los conteos por cuadra no están. Pedile al panel el archivo de nuevo cuando pueda bajarlas.'); return; }
     if(!id){ avisar('Tocá un tramo de calle en el mapa (o acercate a uno).'); return; }
     S.tramo = id; dibujar(); const t = S.Z.tramos.find(x=> x.id === id), j = J();
     const cuenta = tipo=> Object.values(S.M.jornadas).reduce((a, x)=> a + (x.vacancia || []).filter(v=> v.tramo === id && v.tipo === tipo).length, 0);
