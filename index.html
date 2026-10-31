@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2B504C">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'none'; worker-src 'self'">
+<title>Relevador · Escollera Data</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<style>
+:root{--bg:#1f1e1a;--panel:#2a2924;--line:#45433a;--ink:#f3efe4;--dim:#b9b3a3;--acc:#9ec5e8;--ok:#7cc6a4;--warn:#f6c46e;--bad:#e4572e;--btn:#3a3830;}
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%;}
+button{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:48px;touch-action:manipulation;}
+button.pri{background:#2B504C;border-color:#3f6f69;font-weight:600;}
+button.on{background:var(--acc);color:#13232E;border-color:var(--acc);font-weight:600;}
+button:disabled{opacity:.45;}
+input,select,textarea{font:inherit;color:var(--ink);background:#14130f;border:1px solid var(--line);border-radius:10px;padding:10px;width:100%;min-height:46px;}
+label{display:block;margin:8px 0 4px;color:var(--dim);font-size:14px;}
+.app{display:flex;flex-direction:column;height:100%;}
+.top{display:flex;gap:8px;align-items:center;padding:8px 10px;padding-top:max(8px,env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line);}
+.top b{flex:1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.top button{min-height:40px;padding:8px 10px;font-size:14px;}
+.gps{font-size:13px;color:var(--dim);padding:4px 10px;background:var(--panel);}
+.gps.mal{color:var(--warn);}
+#mapa{flex:1;position:relative;overflow:hidden;background:#171612;touch-action:none;}
+#mapa svg{width:100%;height:100%;display:block;}
+.barra{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 10px;padding-bottom:max(8px,env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line);}
+.barra .ancho{grid-column:1 / -1;}
+.hoja{position:fixed;inset:auto 0 0 0;max-height:88%;overflow:auto;background:var(--panel);border-top:2px solid var(--line);border-radius:16px 16px 0 0;padding:14px 14px max(14px,env(safe-area-inset-bottom));z-index:5;box-shadow:0 -8px 30px #0008;}
+.hoja h2{font-size:18px;margin:0 0 8px;}
+.fila{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;}
+.fila button{flex:1 1 auto;}
+.tipos{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.tipos button{text-align:left;font-size:14px;}
+.aviso{font-size:13px;color:var(--warn);margin:6px 0;}
+.nota{font-size:13px;color:var(--dim);}
+.miniaturas{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+.miniaturas img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
+.inicio{padding:18px;overflow:auto;}
+.inicio h1{font-size:22px;margin:4px 0 6px;}
+.lista button{display:block;width:100%;text-align:left;margin:6px 0;}
+.contador{font-size:64px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0;}
+.crono{text-align:center;font-size:22px;font-variant-numeric:tabular-nums;color:var(--dim);}
+.oculto{display:none!important;}
+.toast{position:fixed;left:10px;right:10px;bottom:120px;background:#13232E;border:1px solid var(--acc);border-radius:12px;padding:10px 12px;z-index:9;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+  // =====================================================================================
+  // ---------- Estudios de mercado · Etapa 2: núcleo del relevamiento (lo usan el panel Y el Relevador) ----------
+  // =====================================================================================
+  // Este archivo entra igual en el panel (armado.json) y en el Relevador del celular (herramientas/armar-relevador.js):
+  // no usa nada del panel. Tiene:
+  // · identificadores únicos generados en el dispositivo y la huella de una versión de un lugar;
+  // · la UNIÓN de relevamientos (esquema aprobado el 30/10, prototipo y pruebas en paso0_estudio_mercado/
+  //   union_relevamiento.js): importar es unir por uid, lo repetido no duplica, observaciones y jornadas solo se agregan,
+  //   un lugar editado guarda la huella de la versión de la que partió y dos ediciones distintas de la misma versión
+  //   quedan como CONFLICTO para que la persona elija; el resultado no depende del orden de importación;
+  // · la lectura de la posición GPS y la fecha guardadas en una foto (EXIF), sin librerías;
+  // · la compresión de fotos (1.600 px de lado, JPEG 0,75): al volver a codificar la imagen con un canvas se descartan
+  //   TODOS los datos EXIF (posición, modelo del celular), que se leen antes (Ley 25.326, E9);
+  // · un zip mínimo (sin comprimir: las fotos ya son JPEG) para exportar y leer el archivo del relevamiento.
+  const REL_VERSION = 1, REL_FOTO_LADO = 1600, REL_FOTO_CALIDAD = 0.75;
+  const REL_TIPOS = [['competidor', 'Competidor'], ['complementario', 'Comercio complementario'], ['vacio', 'Local vacío o en alquiler'], ['flujo', 'Generador de flujo (oficina, escuela, facultad, parada, hospital)'], ['obra', 'Obra en construcción'], ['problema', 'Problema urbano'], ['otro', 'Otro']];
+  const REL_SENALES = [['obra', 'Obra'], ['proximamente', 'Cartel «próximamente»'], ['persiana', 'Persiana baja'], ['nuevo', 'Local nuevo']];
+  const REL_ESTADOS = [['abierto', 'Sigue abierto'], ['cerro', 'Cerró'], ['cambio', 'Cambió de rubro']];
+  const REL_CAMINA = [['veredas', 'Veredas en buen estado'], ['rampas', 'Rampas en las esquinas'], ['luz', 'Iluminación'], ['sinBasural', 'Sin basurales'], ['refugio', 'Parada con refugio'], ['senales', 'Señalización']];
+  function relUid(p){ const b = new Uint8Array(9); crypto.getRandomValues(b); return p + '-' + Date.now().toString(36) + Array.from(b, x=> (x % 36).toString(36)).join(''); }
+  // JSON con las claves ordenadas (a cualquier profundidad): la misma versión da la misma huella en cualquier dispositivo
+  function relCanon(v){ if(Array.isArray(v)) return '[' + v.map(relCanon).join(',') + ']'; if(v && typeof v === 'object') return '{' + Object.keys(v).sort().filter(k=> v[k] !== undefined).map(k=> JSON.stringify(k) + ':' + relCanon(v[k])).join(',') + '}'; return JSON.stringify(v); }
+  // huella de una versión de un lugar (sin su «base»): FNV-1a de 2 × 32 bits, en hexadecimal
+  function relHuella(l){ const { base, ...resto } = l, s = relCanon(resto); let a = 0x811c9dc5, b = 0x01000193 ^ s.length; for(let i = 0; i < s.length; i++){ const c = s.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193) >>> 0; b = Math.imul(b ^ (c + 0x9e37), 0x85ebca6b) >>> 0; } return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0'); }
+  function relVacio(){ return { version: REL_VERSION, lugares:{}, obs:{}, jornadas:{}, historial:{}, conflictos:{}, importaciones:[] }; }
+  // une un archivo ({ lugares:[], obs:[], jornadas:[] }) al maestro M; devuelve qué pasó
+  function relUnir(M, archivo){
+    const R = { nuevos: 0, repetidos: 0, aplicados: 0, conflictos: 0 };
+    (archivo.obs || []).forEach(o=>{ if(M.obs[o.uid]) R.repetidos++; else { M.obs[o.uid] = o; R.nuevos++; } });
+    (archivo.jornadas || []).forEach(j=>{ const cur = M.jornadas[j.uid]; if(!cur){ M.jornadas[j.uid] = j; R.nuevos++; } else if(relCanon(cur) === relCanon(j)) R.repetidos++; else { M.jornadas[j.uid] = relJornadaUnir(cur, j); R.aplicados++; } });
+    (archivo.lugares || []).forEach(l=>{
+      const h = relHuella(l), vis = M.historial[l.uid] = M.historial[l.uid] || {}; vis[h] = [].concat(l.base || []);
+      const cur = M.lugares[l.uid];
+      if(!cur){ M.lugares[l.uid] = l; R.nuevos++; return; }
+      const hc = relHuella(cur); if(hc === h){ R.repetidos++; return; }
+      const desciende = (x, de)=>{ const pila = [x], vistos = new Set(); while(pila.length){ const k = pila.pop(); if(k === de) return true; if(vistos.has(k)) continue; vistos.add(k); pila.push(...(vis[k] || [])); } return false; };
+      if(desciende(h, hc)){ M.lugares[l.uid] = l; delete M.conflictos[l.uid]; R.aplicados++; }
+      else if(desciende(hc, h)) R.repetidos++;
+      else { const c = M.conflictos[l.uid] = M.conflictos[l.uid] || {}; c[hc] = cur; c[h] = l; R.conflictos++; }
+    });
+    return R;
+  }
+  // una jornada sigue creciendo mientras está abierta (más traza, más conteos): la unión junta lo de las dos versiones
+  function relJornadaUnir(a, b){
+    const j = Object.assign({}, a, b), clave = x=> relCanon(x);
+    const lista = (x, y)=>{ const m = new Map(); (x || []).concat(y || []).forEach(e=> m.set(clave(e), e)); return [...m.values()]; };
+    j.traza = lista(a.traza, b.traza).sort((p, q)=> String(p[2]).localeCompare(String(q[2])));
+    j.conteos = lista(a.conteos, b.conteos); j.vacancia = lista(a.vacancia, b.vacancia); j.camina = lista(a.camina, b.camina); j.entrevistas = lista(a.entrevistas, b.entrevistas);
+    j.fin = [a.fin, b.fin].filter(Boolean).sort().pop() || null; j.inicio = [a.inicio, b.inicio].filter(Boolean).sort()[0] || null;
+    return j;
+  }
+  // la persona elige una de las versiones en conflicto: queda como versión nueva que desciende de todas
+  function relElegir(M, uid, h, cuando){ const c = M.conflictos[uid], partes = Object.keys(c); const l = Object.assign({}, c[h], { resuelto: cuando || new Date().toISOString(), base: partes }); M.lugares[uid] = l; M.historial[uid][relHuella(l)] = partes; delete M.conflictos[uid]; return l; }
+  // editar un lugar: la versión nueva recuerda de cuál partió
+  function relEditar(M, uid, cambios){ const cur = M.lugares[uid]; if(!cur) return null; const l = Object.assign({}, cur, cambios, { base: [relHuella(cur)] }); const vis = M.historial[uid] = M.historial[uid] || {}; vis[relHuella(cur)] = vis[relHuella(cur)] || [].concat(cur.base || []); vis[relHuella(l)] = l.base; M.lugares[uid] = l; return l; }
+  // observaciones de un lugar, de la más vieja a la más nueva
+  function relObsDe(M, uid){ return Object.values(M.obs).filter(o=> o.lugar === uid).sort((a, b)=> String(a.ts).localeCompare(String(b.ts))); }
+  function relUltimaObs(M, uid){ const o = relObsDe(M, uid); return o[o.length - 1] || null; }
+
+  // ---------- EXIF: posición, fecha y orientación de una foto JPEG ----------
+  function relExif(buf){
+    try{
+      const d = new DataView(buf); if(d.getUint16(0) !== 0xFFD8) return null;
+      let p = 2;
+      while(p + 4 < d.byteLength){
+        const m = d.getUint16(p), len = d.getUint16(p + 2);
+        if(m === 0xFFE1 && d.getUint32(p + 4) === 0x45786966) return relTiff(d, p + 10);
+        if((m & 0xFF00) !== 0xFF00) break; p += 2 + len;
+      }
+    }catch(e){ /* foto sin EXIF legible */ }
+    return null;
+  }
+  function relTiff(d, t){
+    const le = d.getUint16(t) === 0x4949, u16 = o=> d.getUint16(t + o, le), u32 = o=> d.getUint32(t + o, le);
+    const ifd = o=>{ const n = u16(o), out = {}; for(let i = 0; i < n; i++){ const e = o + 2 + i*12; out[u16(e)] = { tipo: u16(e + 2), n: u32(e + 4), v: e + 8 }; } return out; };
+    const rac = (o, k)=>{ const a = []; for(let i = 0; i < k; i++) a.push(u32(o + i*8)/(u32(o + i*8 + 4) || 1)); return a; };
+    const txt = e=>{ const o = e.n > 4 ? u32(e.v) : e.v; let s = ''; for(let i = 0; i < e.n - 1; i++) s += String.fromCharCode(d.getUint8(t + o + i)); return s; };
+    const I0 = ifd(u32(4)), out = {};
+    if(I0[0x0112]) out.orientacion = u16(I0[0x0112].v);
+    const ex = I0[0x8769] ? ifd(u32(I0[0x8769].v)) : {};
+    const f = ex[0x9003] || I0[0x0132]; if(f){ const m = txt(f).match(/^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)/); if(m) out.fecha = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`; }
+    if(I0[0x8825]){
+      const g = ifd(u32(I0[0x8825].v)), coord = (k, ref)=>{ if(!g[k]) return null; const a = rac(u32(g[k].v), 3), v = a[0] + a[1]/60 + a[2]/3600, r = g[ref] ? String.fromCharCode(d.getUint8(t + g[ref].v)) : ''; return r === 'S' || r === 'W' ? -v : v; };
+      const lat = coord(2, 1), lon = coord(4, 3);
+      if(Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon)){ out.lat = lat; out.lon = lon; if(g[0x1F]) out.prec = rac(u32(g[0x1F].v), 1)[0]; }
+    }
+    return out;
+  }
+  // ---------- fotos: leer la posición y comprimir (sin EXIF) ----------
+  async function relFoto(file){
+    const buf = await file.arrayBuffer(), ex = relExif(buf) || {};
+    let bmp = null;
+    try{ bmp = await createImageBitmap(file, { imageOrientation:'from-image' }); }catch(e){ bmp = await createImageBitmap(file); }
+    const k = Math.min(1, REL_FOTO_LADO/Math.max(bmp.width, bmp.height)), w = Math.max(1, Math.round(bmp.width*k)), h = Math.max(1, Math.round(bmp.height*k));
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(bmp, 0, 0, w, h); if(bmp.close) bmp.close();
+    const blob = await new Promise(r=> cv.toBlob(r, 'image/jpeg', REL_FOTO_CALIDAD));
+    return { blob, w, h, exif: { lat: ex.lat, lon: ex.lon, prec: ex.prec, fecha: ex.fecha }, ts: ex.fecha || (file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString()) };
+  }
+  // ---------- zip mínimo (almacenado, sin comprimir) ----------
+  const REL_CRC = (()=>{ const t = new Uint32Array(256); for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function relCrc(u8){ let c = 0xFFFFFFFF; for(let i = 0; i < u8.length; i++) c = REL_CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function relZip(archivos){ // [{ nombre, datos: Uint8Array }] → Blob
+    const te = new TextEncoder(), partes = [], central = []; let off = 0;
+    const d = new Date(), hora = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dia = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    archivos.forEach(a=>{
+      const n = te.encode(a.nombre), crc = relCrc(a.datos), h = new DataView(new ArrayBuffer(30));
+      [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, hora, 2], [12, dia, 2], [14, crc, 4], [18, a.datos.length, 4], [22, a.datos.length, 4], [26, n.length, 2], [28, 0, 2]].forEach(([o, v, s])=> s === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true));
+      const c = new DataView(new ArrayBuffer(46));
+      [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, hora, 2], [14, dia, 2], [16, crc, 4], [20, a.datos.length, 4], [24, a.datos.length, 4], [28, n.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, off, 4]].forEach(([o, v, s])=> s === 4 ? c.setUint32(o, v, true) : c.setUint16(o, v, true));
+      partes.push(new Uint8Array(h.buffer), n, a.datos); central.push(new Uint8Array(c.buffer), n); off += 30 + n.length + a.datos.length;
+    });
+    const tam = central.reduce((s, x)=> s + x.length, 0), fin = new DataView(new ArrayBuffer(22));
+    [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, archivos.length, 2], [10, archivos.length, 2], [12, tam, 4], [16, off, 4], [20, 0, 2]].forEach(([o, v, s])=> s === 4 ? fin.setUint32(o, v, true) : fin.setUint16(o, v, true));
+    return new Blob(partes.concat(central, [new Uint8Array(fin.buffer)]), { type:'application/zip' });
+  }
+  // lee un zip almacenado (el que arma relZip); si viene comprimido (lo rearmó otro programa) devuelve null y el panel usa capaUnzip
+  function relUnzip(buf){
+    const d = new DataView(buf), u8 = new Uint8Array(buf), td = new TextDecoder(), out = {};
+    let e = -1; for(let i = d.byteLength - 22; i >= Math.max(0, d.byteLength - 65557); i--) if(d.getUint32(i, true) === 0x06054b50){ e = i; break; }
+    if(e < 0) throw new Error('El archivo no es un zip.');
+    let p = d.getUint32(e + 16, true); const n = d.getUint16(e + 10, true);
+    for(let k = 0; k < n; k++){
+      if(d.getUint32(p, true) !== 0x02014b50) throw new Error('El zip está dañado.');
+      const met = d.getUint16(p + 10, true), tam = d.getUint32(p + 20, true), ln = d.getUint16(p + 28, true), lx = d.getUint16(p + 30, true), lc = d.getUint16(p + 32, true), loc = d.getUint32(p + 42, true);
+      const nombre = td.decode(u8.subarray(p + 46, p + 46 + ln)); if(met !== 0) return null;
+      const ini = loc + 30 + d.getUint16(loc + 26, true) + d.getUint16(loc + 28, true); out[nombre] = u8.slice(ini, ini + tam);
+      p += 46 + ln + lx + lc;
+    }
+    return out;
+  }
+  // feriados nacionales para marcar los conteos y las observaciones. Lista local (no se consulta nada): 2025 y 2026 según los
+  // decretos publicados; 2027 se suma cuando salga el suyo. El 10/2 (aniversario de Mar del Plata) se marca aparte.
+  const REL_FERIADOS = ['2025-01-01', '2025-03-03', '2025-03-04', '2025-03-24', '2025-04-02', '2025-04-18', '2025-05-01', '2025-05-02', '2025-05-25', '2025-06-16', '2025-06-20', '2025-07-09', '2025-08-15', '2025-10-10', '2025-11-21', '2025-11-24', '2025-12-08', '2025-12-25',
+    '2026-01-01', '2026-02-16', '2026-02-17', '2026-03-23', '2026-03-24', '2026-04-02', '2026-04-03', '2026-05-01', '2026-05-25', '2026-06-15', '2026-06-20', '2026-07-09', '2026-07-10', '2026-08-17', '2026-10-12', '2026-11-23', '2026-12-07', '2026-12-08', '2026-12-25',];
+  const REL_FERIADOS_LOCALES = { '02-10': 'aniversario de Mar del Plata' };
+  function relFeriado(ts){ const f = String(ts || '').slice(0, 10); if(REL_FERIADOS.includes(f)) return 'feriado nacional'; return REL_FERIADOS_LOCALES[f.slice(5)] || null; }
+  // =====================================================================================
+  // ---------- Relevador de Escollera Data (página para el celular) ----------
+  // =====================================================================================
+  // Página aparte, liviana y SIN NINGÚN DATO del panel: trae solo el núcleo del relevamiento (38n) y esto. No se conecta
+  // a nada (la política de contenido prohíbe cualquier conexión): el mapa sale del archivo de zona que arma el panel
+  // («Llevar a la calle») y se dibuja en SVG. Todo se guarda en el teléfono al instante (IndexedDB, almacenamiento
+  // persistente) y sobrevive si se cierra el navegador. Al terminar, «Exportar» arma un zip con lo nuevo (o todo) para
+  // pasarlo a la PC por WhatsApp, Drive o cable; el panel lo une con relUnir (los identificadores son estables).
+  const esc = s=> String(s == null ? '' : s).replace(/[&<>"']/g, c=> ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const KX = 111320*Math.cos(38*Math.PI/180), KY = 110540;
+  const RV_CANASTA = { 'cafetería':'Café con leche con dos medialunas', 'farmacia':'Ibuprofeno 400 mg × 10 comprimidos', 'almacén':'Leche entera 1 litro', 'panadería':'1 kg de pan francés', 'gimnasio':'Cuota mensual libre', 'verdulería':'1 kg de papa' };
+  // ---------- almacén del teléfono ----------
+  let dbP = null;
+  function db(){ return dbP || (dbP = new Promise((ok, mal)=>{ const r = indexedDB.open('escollera_relevador', 1); r.onupgradeneeded = ()=> r.result.createObjectStore('kv'); r.onsuccess = ()=> ok(r.result); r.onerror = ()=> mal(r.error); })); }
+  async function kvGet(k){ const d = await db(); return new Promise((ok, mal)=>{ const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = ()=> ok(q.result); q.onerror = ()=> mal(q.error); }); }
+  async function kvSet(k, v){ const d = await db(); return new Promise((ok, mal)=>{ const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = ()=> ok(); t.onerror = ()=> mal(t.error); }); }
+  async function kvDel(k){ const d = await db(); return new Promise((ok, mal)=>{ const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = ()=> ok(); t.onerror = ()=> mal(t.error); }); }
+  async function kvKeys(){ const d = await db(); return new Promise((ok, mal)=>{ const q = d.transaction('kv').objectStore('kv').getAllKeys(); q.onsuccess = ()=> ok(q.result); q.onerror = ()=> mal(q.error); }); }
+  // ---------- estado ----------
+  // S.rel = { zonaArchivo, M: relVacio() con lo nuevo y lo ya relevado, exportados: { uid: true }, jornada: uid|null }
+  const S = { zonas: [], zid: null, Z: null, M: null, exportados: {}, jornada: null, modo: 'rapido', quien: '', pos: null, watch: null, vista: null, hoja: null, borrador: null, tramo: null, conteo: null };
+  const guardar = ()=> kvSet('sesion:' + S.zid, { Z: S.Z, M: S.M, exportados: S.exportados, jornada: S.jornada, modo: S.modo });
+  const avisar = t=>{ const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(()=> d.remove(), 3200); };
+  async function arrancar(){
+    // primero el service worker (para abrir sin señal); el pedido de almacenamiento persistente puede quedar esperando
+    // la respuesta del navegador, así que no se lo espera
+    if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+    try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{}); }catch(e){ /* sin almacenamiento persistente: igual se guarda */ }
+    S.quien = (await kvGet('quien')) || '';
+    S.zonas = (await kvKeys()).filter(k=> String(k).startsWith('sesion:'));
+    pantallaInicio();
+  }
+  // ---------- inicio ----------
+  async function pantallaInicio(){
+    const ses = []; for(const k of S.zonas){ const s = await kvGet(k); if(s && s.Z) ses.push({ k, nombre: s.Z.zona.nombre, n: Object.keys(s.M.lugares).length, pend: pendientes(s).length }); }
+    app().innerHTML = `<div class="inicio"><h1>Relevador</h1><p class="nota">Para relevar una zona en la calle, sin conexión. Los datos quedan en este teléfono hasta que los exportás.</p>
+      <label for="rvQuien">Quién releva</label><input id="rvQuien" maxlength="80" value="${esc(S.quien)}" placeholder="Tu nombre o iniciales">
+      <h2>Zonas en este teléfono</h2><div class="lista">${ses.map(s=> `<button data-ses="${esc(s.k)}">${esc(s.nombre)}<br><span class="nota">${s.n} lugares · ${s.pend} sin exportar</span></button>`).join('') || '<p class="nota">Todavía ninguna.</p>'}</div>
+      <label for="rvZonaArch">Cargar el archivo de una zona («Llevar a la calle» en el panel)</label><input type="file" id="rvZonaArch" accept=".json,application/json">
+      <p class="nota">No saques fotos centradas en personas ni en patentes.</p></div>`;
+    $('rvQuien').onchange = ()=>{ S.quien = $('rvQuien').value.trim().slice(0, 80); kvSet('quien', S.quien); };
+    document.querySelectorAll('[data-ses]').forEach(b=> b.onclick = async ()=>{ const s = await kvGet(b.dataset.ses); abrirSesion(s); });
+    $('rvZonaArch').onchange = async ()=>{ const f = $('rvZonaArch').files[0]; if(!f) return; try{ const z = JSON.parse(await f.text()); if(z.formato !== 'escollera-zona') throw new Error('No es un archivo de zona del panel.'); await cargarZona(z); }catch(e){ alert('No se pudo abrir: ' + e.message); } };
+  }
+  const $ = id=> document.getElementById(id), app = ()=> document.getElementById('app');
+  async function cargarZona(Z){
+    const k = 'sesion:' + Z.zona.id, prev = await kvGet(k), M = prev ? prev.M : relVacio();
+    // lo ya relevado que trae el archivo («Continuar en la calle»): se une, y cuenta como ya exportado
+    const exp = prev ? prev.exportados : {};
+    relUnir(M, { lugares: Z.lugares || [], obs: Z.obs || [], jornadas: (Z.jornadas || []).map(j=> Object.assign({ previa: true }, j)) });
+    (Z.lugares || []).forEach(l=> exp[l.uid] = relHuella(l)); (Z.obs || []).forEach(o=> exp[o.uid] = true);
+    await kvSet(k, { Z, M, exportados: exp, jornada: prev ? prev.jornada : null, modo: prev ? prev.modo : 'rapido' });
+    abrirSesion(await kvGet(k));
+  }
+  function abrirSesion(s){
+    Object.assign(S, { Z: s.Z, M: s.M, exportados: s.exportados || {}, jornada: s.jornada || null, modo: s.modo || 'rapido', zid: s.Z.zona.id, hoja: null });
+    if(!S.quien){ const q = prompt('¿Quién releva? (tu nombre o iniciales)') || ''; S.quien = q.trim().slice(0, 80); kvSet('quien', S.quien); }
+    if(!S.jornada || (S.M.jornadas[S.jornada] && S.M.jornadas[S.jornada].fin)) nuevaJornada();
+    encuadrar(); pantallaMapa(); gpsEmpezar();
+  }
+  function nuevaJornada(){ const j = { uid: relUid('j'), zona: S.zid, por: S.quien, inicio: ahora(), fin: null, traza: [], conteos: [], vacancia: [], camina: [], entrevistas: [] }; S.M.jornadas[j.uid] = j; S.jornada = j.uid; guardar(); }
+  const ahora = ()=>{ const d = new Date(), p = n=> String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  const J = ()=> S.M.jornadas[S.jornada];
+  // ---------- GPS y traza ----------
+  function gpsEmpezar(){
+    if(!navigator.geolocation){ S.pos = null; dibujarGps(); return; }
+    if(S.watch != null) navigator.geolocation.clearWatch(S.watch);
+    S.watch = navigator.geolocation.watchPosition(p=>{
+      S.pos = { lat: p.coords.latitude, lon: p.coords.longitude, prec: p.coords.accuracy, ts: ahora() };
+      const t = J() && J().traza, u = t && t[t.length - 1];
+      if(t && !J().fin && (!u || dist([u[0], u[1]], [S.pos.lat, S.pos.lon]) > 15)){ t.push([+S.pos.lat.toFixed(6), +S.pos.lon.toFixed(6), S.pos.ts, Math.round(S.pos.prec)]); guardar(); }
+      dibujarGps(); dibujar();
+    }, ()=>{ S.pos = null; dibujarGps(); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+  }
+  function dist(a, b){ return Math.hypot((a[1] - b[1])*KX, (a[0] - b[0])*KY); }
+  function dibujarGps(){ const g = $('rvGps'); if(!g) return; if(!S.pos){ g.textContent = 'Sin GPS todavía (en interiores tarda; podés marcar el punto en el mapa)'; g.className = 'gps mal'; return; } g.textContent = `GPS ±${Math.round(S.pos.prec)} m${S.pos.prec > 20 ? ' · precisión baja: corregí el punto en el mapa' : ''} · ${modoTxt()}`; g.className = 'gps' + (S.pos.prec > 20 ? ' mal' : ''); }
+  const modoTxt = ()=> S.modo === 'completo' ? 'modo completo' : 'modo rápido';
+  // ---------- mapa (SVG, sin mosaicos) ----------
+  function encuadrar(){
+    const pts = S.Z.tramos.flatMap(t=> t.c); if(!pts.length) return;
+    const xs = pts.map(p=> p[1]*KX), ys = pts.map(p=> -p[0]*KY), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    S.vista = { x: x0 - 40, y: y0 - 40, w: x1 - x0 + 80, h: y1 - y0 + 80 };
+  }
+  function pantallaMapa(){
+    app().innerHTML = `<div class="top"><b>${esc(S.Z.zona.nombre)}</b><button id="rvModo">${S.modo === 'completo' ? 'Completo' : 'Rápido'}</button><button id="rvMenu">Menú</button></div>
+      <div class="gps" id="rvGps"></div><div id="mapa"></div>
+      <div class="barra"><button class="pri" id="rvPunto">+ Punto</button><button id="rvTramoBtn">Tramo</button>${S.modo === 'completo' ? '<button id="rvConteo">Conteo de gente</button><button id="rvCharla">3 preguntas</button>' : ''}<button class="ancho" id="rvExportar">Exportar relevamiento (${pendientes().length} sin exportar)</button></div>`;
+    $('rvModo').onclick = ()=>{ S.modo = S.modo === 'completo' ? 'rapido' : 'completo'; guardar(); pantallaMapa(); };
+    $('rvMenu').onclick = menu;
+    $('rvPunto').onclick = ()=> hojaPunto(null);
+    $('rvTramoBtn').onclick = ()=> hojaTramo(tramoCercano());
+    if($('rvConteo')) $('rvConteo').onclick = hojaConteo;
+    if($('rvCharla')) $('rvCharla').onclick = hojaCharla;
+    $('rvExportar').onclick = hojaExportar;
+    gestos(); dibujar(); dibujarGps();
+  }
+  function px(lat, lon){ const v = S.vista, el = $('mapa'), W = el.clientWidth || 360, H = el.clientHeight || 500, k = Math.min(W/v.w, H/v.h); return [(lon*KX - v.x)*k + (W - v.w*k)/2, (-lat*KY - v.y)*k + (H - v.h*k)/2, k]; }
+  function aGeo(sx, sy){ const v = S.vista, el = $('mapa'), W = el.clientWidth, H = el.clientHeight, k = Math.min(W/v.w, H/v.h); return [-((sy - (H - v.h*k)/2)/k + v.y)/KY, ((sx - (W - v.w*k)/2)/k + v.x)/KX]; }
+  const COLOR = { competidor:'#e4572e', complementario:'#9ec5e8', vacio:'#f6c46e', flujo:'#7cc6a4', obra:'#c9a0dc', problema:'#f2a58e', otro:'#eae4d6' };
+  function tramosHechos(){ const s = new Set(); Object.values(S.M.jornadas).forEach(j=>{ (j.vacancia || []).forEach(v=> s.add(v.tramo)); (j.camina || []).forEach(v=> s.add(v.tramo)); (j.tramosHechos || []).forEach(t=> s.add(t)); }); return s; }
+  function dibujar(){
+    const el = $('mapa'); if(!el || !S.vista) return;
+    const W = el.clientWidth || 360, H = el.clientHeight || 500, k = px(0, 0)[2], hechos = tramosHechos(), hoy = J();
+    let s = '';
+    (S.Z.contorno.features || []).forEach(f=>{ const r = f.geometry.coordinates[0]; s += `<path d="${r.map((p, i)=>{ const [x, y] = px(p[1], p[0]); return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1); }).join('')}Z" fill="#2B504C33" stroke="none"/>`; });
+    S.Z.tramos.forEach(t=>{ const d = t.c.map((p, i)=>{ const [x, y] = px(p[0], p[1]); return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1); }).join(''); s += `<path d="${d}" fill="none" stroke="${hechos.has(t.id) ? '#7cc6a4' : t.id === S.tramo ? '#9ec5e8' : '#8d897b'}" stroke-width="${t.id === S.tramo ? 5 : 3}" stroke-linecap="round" data-tramo="${esc(t.id)}"/>`; });
+    if(k > 0.35) S.Z.tramos.forEach(t=>{ const m = t.c[Math.floor(t.c.length/2)], m2 = t.c.length === 2 ? [(t.c[0][0] + t.c[1][0])/2, (t.c[0][1] + t.c[1][1])/2] : m, [x, y] = px(m2[0], m2[1]); s += `<g pointer-events="none"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" fill="#1f1e1a" stroke="#8d897b"/><text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" font-size="10" text-anchor="middle" fill="#f3efe4">${t.n}</text></g>`; });
+    if(hoy && hoy.traza.length > 1) s += `<path d="${hoy.traza.map((p, i)=>{ const [x, y] = px(p[0], p[1]); return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1); }).join('')}" fill="none" stroke="#9ec5e8" stroke-width="2" stroke-dasharray="4 4" pointer-events="none"/>`;
+    // los símbolos crecen al acercar (de lejos, 115 competidores tapan los números de los tramos)
+    const tc = Math.max(3, Math.min(8, 25*k)), tl = Math.max(4, Math.min(10, 30*k));
+    const relevados = new Set(Object.values(S.M.lugares).map(l=> l.ref && l.ref.id).filter(Boolean));
+    (S.Z.conocidos || []).forEach((c, i)=>{ if(relevados.has(c.ref.id)) return; const [x, y] = px(c.lat, c.lon); s += `<rect x="${(x - tc).toFixed(1)}" y="${(y - tc).toFixed(1)}" width="${2*tc}" height="${2*tc}" rx="2" fill="#1f1e1a" stroke="#e4572e" stroke-width="1.5" data-conocido="${i}"/>`; });
+    Object.values(S.M.lugares).forEach(l=>{ const [x, y] = px(l.lat, l.lon), deHoy = relObsDe(S.M, l.uid).some(o=> o.jornada === S.jornada); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(deHoy ? tl : tl*0.8).toFixed(1)}" fill="${COLOR[l.tipo] || '#eae4d6'}" fill-opacity="${deHoy ? 1 : 0.55}" stroke="#13232E" stroke-width="1.5" data-lugar="${esc(l.uid)}"/>`; });
+    if(S.borrador && S.borrador.lat != null){ const [x, y] = px(S.borrador.lat, S.borrador.lon); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13" fill="#f6c46e" stroke="#fff" stroke-width="3"/>`; }
+    if(S.pos){ const [x, y] = px(S.pos.lat, S.pos.lon); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(6, S.pos.prec*k).toFixed(1)}" fill="#9ec5e822" stroke="#9ec5e8" pointer-events="none"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="#9ec5e8" stroke="#fff" stroke-width="2" pointer-events="none"/>`; }
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Mapa de la zona">${s}</svg>`;
+  }
+  // arrastrar, pellizcar y tocar
+  function gestos(){
+    const el = $('mapa'), pts = new Map(); let mov = 0, ini = null;
+    el.onpointerdown = e=>{ el.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); mov = 0; ini = { v: Object.assign({}, S.vista), p: [...pts.values()].map(p=> p.slice()) }; };
+    el.onpointermove = e=>{
+      if(!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]); const P = [...pts.values()], k = px(0, 0)[2];
+      if(P.length === 1 && ini.p.length === 1){ const dx = P[0][0] - ini.p[0][0], dy = P[0][1] - ini.p[0][1]; mov = Math.max(mov, Math.hypot(dx, dy)); S.vista.x = ini.v.x - dx/k; S.vista.y = ini.v.y - dy/k; }
+      else if(P.length === 2 && ini.p.length === 2){ const d0 = Math.hypot(ini.p[0][0] - ini.p[1][0], ini.p[0][1] - ini.p[1][1]), d1 = Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]), f = d0/Math.max(20, d1); mov = 99; S.vista.w = ini.v.w*f; S.vista.h = ini.v.h*f; S.vista.x = ini.v.x + (ini.v.w - S.vista.w)/2; S.vista.y = ini.v.y + (ini.v.h - S.vista.h)/2; }
+      requestAnimationFrame(dibujar);
+    };
+    el.onpointerup = e=>{ pts.delete(e.pointerId); if(mov < 8 && e.isPrimary !== false) tocar(e); if(pts.size) ini = { v: Object.assign({}, S.vista), p: [...pts.values()].map(p=> p.slice()) }; };
+    el.onpointercancel = e=> pts.delete(e.pointerId);
+    el.onwheel = e=>{ e.preventDefault(); const f = e.deltaY > 0 ? 1.2 : 1/1.2, c = { x: S.vista.x + S.vista.w/2, y: S.vista.y + S.vista.h/2 }; S.vista.w *= f; S.vista.h *= f; S.vista.x = c.x - S.vista.w/2; S.vista.y = c.y - S.vista.h/2; dibujar(); };
+  }
+  let ultimoToque = null;
+  function tocar(e){
+    // un mismo toque puede llegar dos veces (toque y su clic de compatibilidad): se ignora el repetido
+    const ya = Date.now(); if(ultimoToque && ya - ultimoToque.t < 400 && Math.hypot(e.clientX - ultimoToque.x, e.clientY - ultimoToque.y) < 10) return; ultimoToque = { t: ya, x: e.clientX, y: e.clientY };
+    const r = $('mapa').getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, t = document.elementFromPoint(e.clientX, e.clientY);
+    if(S.hoja && S.hoja !== 'punto') return; // con una hoja abierta, el mapa no abre otra (primero se cierra)
+    if(S.borrador && S.hoja === 'punto'){ const [lat, lon] = aGeo(sx, sy); Object.assign(S.borrador, { lat, lon, prec: null, ubic: 'mapa' }); dibujar(); refrescarUbic(); return; }
+    if(t && t.dataset){ if(t.dataset.lugar) return hojaLugar(t.dataset.lugar); if(t.dataset.conocido != null) return hojaConocido(+t.dataset.conocido); if(t.dataset.tramo){ S.tramo = t.dataset.tramo; dibujar(); return hojaTramo(t.dataset.tramo); } }
+    // el dedo no cayó justo encima: lo más cercano a menos de 24 px (primero puntos, después tramos)
+    const d2 = (lat, lon)=>{ const [x, y] = px(lat, lon); return Math.hypot(x - sx, y - sy); };
+    let best = null, bd = 24;
+    Object.values(S.M.lugares).forEach(l=>{ const d = d2(l.lat, l.lon); if(d < bd){ bd = d; best = ()=> hojaLugar(l.uid); } });
+    const yaRel = new Set(Object.values(S.M.lugares).map(l=> l.ref && l.ref.id).filter(Boolean));
+    (S.Z.conocidos || []).forEach((c, i)=>{ if(yaRel.has(c.ref.id)) return; const d = d2(c.lat, c.lon); if(d < bd){ bd = d; best = ()=> hojaConocido(i); } });
+    if(!best){ S.Z.tramos.forEach(t=>{ for(let i = 1; i < t.c.length; i++){ const [ax, ay] = px(t.c[i - 1][0], t.c[i - 1][1]), [bx, by] = px(t.c[i][0], t.c[i][1]), L = (bx - ax)**2 + (by - ay)**2, u = L ? Math.max(0, Math.min(1, ((sx - ax)*(bx - ax) + (sy - ay)*(by - ay))/L)) : 0, d = Math.hypot(ax + u*(bx - ax) - sx, ay + u*(by - ay) - sy); if(d < bd){ bd = d; best = ()=>{ S.tramo = t.id; dibujar(); hojaTramo(t.id); }; } } }); }
+    if(best) best();
+  }
+  function tramoCercano(){
+    if(!S.pos) return S.tramo;
+    let best = null, bd = Infinity; S.Z.tramos.forEach(t=> t.c.forEach(p=>{ const d = dist(p, [S.pos.lat, S.pos.lon]); if(d < bd){ bd = d; best = t.id; } }));
+    return bd < 80 ? best : S.tramo;
+  }
+  // ---------- hojas (formularios) ----------
+  function hoja(html, tipo){ cerrarHoja(); S.hoja = tipo; const d = document.createElement('div'); d.className = 'hoja'; d.id = 'rvHoja'; d.innerHTML = html; document.body.appendChild(d); return d; }
+  function cerrarHoja(){ const h = $('rvHoja'); if(h) h.remove(); S.hoja = null; }
+  function hojaPunto(lugar){
+    S.borrador = { lugar, tipo: lugar ? lugar.tipo : 'competidor', nombre: lugar ? lugar.nombre : '', rubro: lugar ? lugar.rubro : '', fotos: [], nota: '', atractivo: null, estado: '', senales: [], lat: lugar ? lugar.lat : (S.pos ? S.pos.lat : null), lon: lugar ? lugar.lon : (S.pos ? S.pos.lon : null), prec: lugar ? lugar.prec : (S.pos ? S.pos.prec : null), ubic: lugar ? lugar.ubic : (S.pos ? 'gps' : null), ocup: null, precio: null, horarios: null, ref: null };
+    pintarPunto(); dibujar();
+  }
+  function pintarPunto(){
+    const B = S.borrador, comp = B.tipo === 'competidor', completo = S.modo === 'completo', l = B.lugar;
+    const h = hoja(`<h2>${l ? 'Otra visita: ' + esc(l.nombre || 'lugar') : 'Punto nuevo'}</h2>
+      <div id="rvUbic" class="nota"></div>
+      ${l ? '' : `<div class="tipos">${REL_TIPOS.map(([v, t])=> `<button data-tipo="${v}" class="${B.tipo === v ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>
+      <label for="rvNom">Nombre</label><input id="rvNom" maxlength="160" value="${esc(B.nombre)}"><label for="rvRub">Rubro</label><input id="rvRub" maxlength="120" value="${esc(B.rubro)}" placeholder="cafetería, farmacia…">`}
+      <label for="rvCam">Fotos (sin personas ni patentes en primer plano)</label><input type="file" id="rvCam" accept="image/*" capture="environment" multiple><div class="miniaturas" id="rvMini"></div>
+      ${comp ? `<label>Atractivo (tamaño, estado y movimiento)</label><div class="fila">${[1, 2, 3, 4, 5].map(n=> `<button data-atr="${n}" class="${B.atractivo === n ? 'on' : ''}">${n}</button>`).join('')}</div>` : ''}
+      ${completo ? `<label>Señales de cambio</label><div class="fila">${REL_SENALES.map(([v, t])=> `<button data-sen="${v}" class="${B.senales.includes(v) ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>` : ''}
+      ${completo && comp ? `<label>Ocupación al pasar (mesas o lugares)</label><div class="fila"><input id="rvOcuA" type="number" inputmode="numeric" placeholder="ocupados" style="flex:1"><input id="rvOcuB" type="number" inputmode="numeric" placeholder="total" style="flex:1"></div>
+        <label for="rvPrecio">Precio de referencia: ${esc(canasta(B.rubro))}</label><input id="rvPrecio" type="number" inputmode="decimal" placeholder="$">
+        <label>Horarios (abre)</label><div class="fila">${['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map(d=> `<button data-dia="${d}">${d}</button>`).join('')}</div><div class="fila"><input id="rvAbre" type="time" value="08:00" style="flex:1"><input id="rvCierra" type="time" value="20:00" style="flex:1"></div>` : ''}
+      ${B.tipo === 'vacio' ? `<label for="rvPrecio">Precio consultado del alquiler (opcional)</label><input id="rvPrecio" type="number" inputmode="decimal" placeholder="$ por mes">` : ''}
+      <label for="rvNota">Notas</label><textarea id="rvNota" rows="2" maxlength="2000">${esc(B.nota)}</textarea>
+      <div class="fila"><button class="pri" id="rvOk">Guardar</button><button id="rvNo">Cancelar</button></div>`, 'punto');
+    refrescarUbic(); miniaturas();
+    h.querySelectorAll('[data-tipo]').forEach(b=> b.onclick = ()=>{ leer(); B.tipo = b.dataset.tipo; pintarPunto(); });
+    h.querySelectorAll('[data-atr]').forEach(b=> b.onclick = ()=>{ B.atractivo = +b.dataset.atr; h.querySelectorAll('[data-atr]').forEach(x=> x.classList.toggle('on', x === b)); });
+    h.querySelectorAll('[data-sen]').forEach(b=> b.onclick = ()=>{ const v = b.dataset.sen; B.senales = B.senales.includes(v) ? B.senales.filter(x=> x !== v) : B.senales.concat(v); b.classList.toggle('on'); });
+    h.querySelectorAll('[data-dia]').forEach(b=> b.onclick = ()=> b.classList.toggle('on'));
+    $('rvCam').onchange = async ()=>{ leer(); for(const f of [...$('rvCam').files]){ try{ const r = await relFoto(f); B.fotos.push(r); if(!B.lugar && Number.isFinite(r.exif.lat) && B.ubic !== 'gps'){ B.lat = r.exif.lat; B.lon = r.exif.lon; B.prec = r.exif.prec || null; B.ubic = 'exif'; } }catch(e){ avisar('No se pudo leer una foto'); } } miniaturas(); refrescarUbic(); dibujar(); };
+    $('rvOk').onclick = ()=>{ leer(); guardarPunto(); };
+    $('rvNo').onclick = ()=>{ S.borrador = null; cerrarHoja(); dibujar(); };
+  }
+  const canasta = rubro=>{ const r = String(rubro || '').toLowerCase(); const k = Object.keys(RV_CANASTA).find(x=> r.includes(x.slice(0, 5))); return k ? RV_CANASTA[k] : 'un producto típico del rubro (anotá cuál en notas)'; };
+  function leer(){
+    const B = S.borrador; if(!B) return;
+    if($('rvNom')) B.nombre = $('rvNom').value; if($('rvRub')) B.rubro = $('rvRub').value; if($('rvNota')) B.nota = $('rvNota').value;
+    if($('rvOcuA') && $('rvOcuB') && $('rvOcuA').value !== '' && $('rvOcuB').value !== '') B.ocup = [+$('rvOcuA').value, +$('rvOcuB').value];
+    if($('rvPrecio') && $('rvPrecio').value !== '') B.precio = { item: B.tipo === 'vacio' ? 'alquiler mensual consultado' : canasta(B.rubro), valor: +$('rvPrecio').value };
+    const dias = [...document.querySelectorAll('[data-dia].on')].map(b=> b.dataset.dia); if(dias.length) B.horarios = { dias, abre: $('rvAbre').value, cierra: $('rvCierra').value };
+  }
+  function refrescarUbic(){ const B = S.borrador, u = $('rvUbic'); if(!u || !B) return; u.innerHTML = B.lat == null ? '<span class="aviso">Sin ubicación: tocá el mapa donde está el lugar.</span>' : `Ubicación ${esc({ gps:'del GPS', exif:'de la foto', mapa:'marcada en el mapa' }[B.ubic] || '')}${B.prec ? ` · ±${Math.round(B.prec)} m` : ''}${B.prec > 20 ? ' <span class="aviso">precisión baja: tocá el mapa para corregir</span>' : ''} · <span class="nota">tocá el mapa para moverlo</span>`; }
+  function miniaturas(){ const m = $('rvMini'); if(!m) return; m.innerHTML = ''; S.borrador.fotos.forEach(f=>{ const i = document.createElement('img'); i.alt = 'Foto'; i.src = URL.createObjectURL(f.blob); m.appendChild(i); }); }
+  async function guardarPunto(){
+    const B = S.borrador; if(B.lat == null){ avisar('Falta la ubicación: tocá el mapa.'); return; }
+    let uid = B.lugar ? B.lugar.uid : null; const ts = ahora();
+    if(!uid){ uid = relUid('l'); S.M.lugares[uid] = { uid, zona: S.zid, tipo: B.tipo, nombre: B.nombre.trim(), rubro: B.rubro.trim(), por: S.quien, creado: ts, lat: B.lat, lon: B.lon, prec: B.prec != null ? Math.round(B.prec) : null, ubic: B.ubic }; if(B.ref) S.M.lugares[uid].ref = B.ref; }
+    else if(B.lugar && (B.lat !== B.lugar.lat || B.lon !== B.lugar.lon)) relEditar(S.M, uid, { lat: B.lat, lon: B.lon, ubic: 'mapa', prec: null });
+    const fotos = [];
+    for(const f of B.fotos){ const fu = relUid('f'); await kvSet('foto:' + fu, { uid: fu, lugar: uid, ts: f.ts, w: f.w, h: f.h, blob: f.blob }); fotos.push(fu); }
+    const o = { uid: relUid('o'), lugar: uid, jornada: S.jornada, ts, por: S.quien, nota: B.nota.trim(), fotos };
+    if(B.atractivo) o.atractivo = B.atractivo; if(B.estado) o.estado = B.estado; if(B.senales.length) o.senales = B.senales; if(B.ocup) o.ocupacion = B.ocup; if(B.precio) o.precio = B.precio; if(B.horarios) o.horarios = B.horarios; if(B.rubroNuevo) o.rubroNuevo = B.rubroNuevo;
+    S.M.obs[o.uid] = o; fotos.forEach(fu=> kvGet('foto:' + fu).then(f=>{ f.obs = o.uid; kvSet('foto:' + fu, f); }));
+    await guardar(); S.borrador = null; cerrarHoja(); avisar(`Guardado${fotos.length ? ` con ${fotos.length} foto(s)` : ''}.`); pantallaMapa();
+  }
+  function hojaLugar(uid){
+    const l = S.M.lugares[uid], obs = relObsDe(S.M, uid);
+    const h = hoja(`<h2>${esc(l.nombre || 'Lugar')}</h2><p class="nota">${esc((REL_TIPOS.find(t=> t[0] === l.tipo) || ['', ''])[1])}${l.rubro ? ' · ' + esc(l.rubro) : ''} · ${obs.length} visita(s), la última ${esc(String((obs[obs.length - 1] || {}).ts || '').slice(0, 16).replace('T', ' '))}</p>
+      <div class="fila"><button class="pri" id="rvOtra">Otra visita</button><button id="rvCierra">Cerrar</button></div>`, 'lugar');
+    $('rvOtra').onclick = ()=> hojaPunto(l); $('rvCierra').onclick = cerrarHoja;
+  }
+  function hojaConocido(i){
+    const c = S.Z.conocidos[i];
+    const h = hoja(`<h2>${esc(c.nombre || '(sin nombre)')}</h2><p class="nota">${esc(c.rubro)} · lo conoce el panel por ${esc(c.ref.fuente)}</p>
+      <div class="fila">${REL_ESTADOS.map(([v, t])=> `<button data-est="${v}">${esc(t)}</button>`).join('')}</div><button id="rvCierra" style="width:100%">Cerrar</button>`, 'conocido');
+    h.querySelectorAll('[data-est]').forEach(b=> b.onclick = ()=>{
+      const rubroNuevo = b.dataset.est === 'cambio' ? (prompt('¿Qué rubro tiene ahora?') || '').trim() : '';
+      S.borrador = { lugar: null, tipo: 'competidor', nombre: c.nombre, rubro: c.rubro, fotos: [], nota: '', atractivo: null, estado: b.dataset.est, senales: [], lat: c.lat, lon: c.lon, prec: null, ubic: 'mapa', ref: c.ref, rubroNuevo };
+      pintarPunto(); avisar('Podés sumar una foto; si no, tocá Guardar.');
+    });
+    $('rvCierra').onclick = cerrarHoja;
+  }
+  // tramo: vacancia (+ local, + vacío) y, en modo completo, caminabilidad
+  function hojaTramo(id){
+    if(!id){ avisar('Tocá un tramo de calle en el mapa (o acercate a uno).'); return; }
+    S.tramo = id; dibujar(); const t = S.Z.tramos.find(x=> x.id === id), j = J();
+    const cuenta = tipo=> Object.values(S.M.jornadas).reduce((a, x)=> a + (x.vacancia || []).filter(v=> v.tramo === id && v.tipo === tipo).length, 0);
+    const h = hoja(`<h2>Tramo ${t.n} · ${esc(t.nombre)}</h2><p class="nota">Contá los locales de la cuadra al pasar.</p>
+      <div class="fila"><button class="pri" data-vac="local">+ local (${cuenta('local')})</button><button class="pri" data-vac="vacio">+ vacío o en alquiler (${cuenta('vacio')})</button></div>
+      ${S.modo === 'completo' ? `<label>Chequeo de la calle (caminabilidad)</label><div class="fila">${REL_CAMINA.map(([v, l])=> `<button data-cam="${v}">${esc(l)}</button>`).join('')}</div><button id="rvCamOk" style="width:100%">Guardar el chequeo de este tramo</button>` : ''}
+      <button id="rvCierra" style="width:100%;margin-top:8px">Listo</button>`, 'tramo');
+    h.querySelectorAll('[data-vac]').forEach(b=> b.onclick = ()=>{ j.vacancia.push({ uid: relUid('v'), tramo: id, tipo: b.dataset.vac, ts: ahora() }); guardar(); hojaTramo(id); });
+    h.querySelectorAll('[data-cam]').forEach(b=> b.onclick = ()=> b.classList.toggle('on'));
+    if($('rvCamOk')) $('rvCamOk').onclick = ()=>{ const ch = {}; REL_CAMINA.forEach(([v])=> ch[v] = !!h.querySelector(`[data-cam="${v}"].on`)); j.camina.push({ uid: relUid('c'), tramo: id, ts: ahora(), checks: ch }); guardar(); avisar('Chequeo guardado.'); };
+    $('rvCierra').onclick = ()=>{ cerrarHoja(); pantallaMapa(); };
+  }
+  // conteo peatonal: botón grande y cronómetro (5 minutos por defecto)
+  function hojaConteo(){
+    const C = S.conteo = { n: 0, mins: 5, inicio: null, timer: null, lat: S.pos ? S.pos.lat : null, lon: S.pos ? S.pos.lon : null };
+    const h = hoja(`<h2>Conteo de gente que pasa</h2><p class="nota">Parate en el punto candidato y tocá una vez por persona.</p>
+      <div class="fila"><button data-min="5" class="on">5 min</button><button data-min="10">10 min</button></div>
+      <div class="contador" id="rvN">0</div><div class="crono" id="rvCrono">5:00</div>
+      <button class="pri" id="rvMas" style="width:100%;min-height:120px;font-size:28px">+1</button>
+      <div class="fila"><button id="rvEmpezar">Empezar</button><button id="rvCierra">Cancelar</button></div>`, 'conteo');
+    h.querySelectorAll('[data-min]').forEach(b=> b.onclick = ()=>{ if(C.inicio) return; C.mins = +b.dataset.min; h.querySelectorAll('[data-min]').forEach(x=> x.classList.toggle('on', x === b)); $('rvCrono').textContent = C.mins + ':00'; });
+    $('rvMas').onclick = ()=>{ if(!C.inicio) empezar(); C.n++; $('rvN').textContent = C.n; if(navigator.vibrate) navigator.vibrate(15); };
+    const empezar = ()=>{ C.inicio = ahora(); const t0 = Date.now(); if(S.pos){ C.lat = S.pos.lat; C.lon = S.pos.lon; } C.timer = setInterval(()=>{ const r = C.mins*60 - Math.floor((Date.now() - t0)/1000); $('rvCrono').textContent = `${Math.floor(Math.max(0, r)/60)}:${String(Math.max(0, r) % 60).padStart(2, '0')}`; if(r <= 0){ clearInterval(C.timer); terminar(); } }, 250); };
+    const terminar = ()=>{ J().conteos.push({ uid: relUid('k'), lat: C.lat, lon: C.lon, inicio: C.inicio, mins: C.mins, n: C.n, tramo: tramoCercano() }); guardar(); if(navigator.vibrate) navigator.vibrate([100, 60, 100]); avisar(`Conteo guardado: ${C.n} personas en ${C.mins} minutos.`); cerrarHoja(); };
+    $('rvEmpezar').onclick = ()=>{ if(!C.inicio) empezar(); };
+    $('rvCierra').onclick = ()=>{ clearInterval(C.timer); cerrarHoja(); };
+  }
+  // tres preguntas a un comerciante vecino: sin nombre ni datos personales, solo el rubro
+  function hojaCharla(){
+    const h = hoja(`<h2>Tres preguntas a un comerciante</h2><p class="nota">Sin nombre ni datos personales: solo el rubro de quien responde.</p>
+      <label for="rvCRub">Rubro de quien responde</label><input id="rvCRub" maxlength="80">
+      <label for="rvC1">¿Cómo es el movimiento?</label><input id="rvC1" maxlength="300"><label for="rvC2">¿En qué horario?</label><input id="rvC2" maxlength="300"><label for="rvC3">¿Qué falta en la zona?</label><input id="rvC3" maxlength="300">
+      <label for="rvCAudio">O una nota de voz (opcional)</label><input type="file" id="rvCAudio" accept="audio/*" capture>
+      <div class="fila"><button class="pri" id="rvOk">Guardar</button><button id="rvNo">Cancelar</button></div>`, 'charla');
+    $('rvOk').onclick = async ()=>{
+      const e = { uid: relUid('e'), ts: ahora(), lat: S.pos ? S.pos.lat : null, lon: S.pos ? S.pos.lon : null, rubro: $('rvCRub').value.trim(), movimiento: $('rvC1').value.trim(), horario: $('rvC2').value.trim(), falta: $('rvC3').value.trim() };
+      const a = $('rvCAudio').files[0]; if(a){ e.audio = relUid('a'); e.audioTipo = a.type || 'audio/mpeg'; await kvSet('audio:' + e.audio, { uid: e.audio, blob: a, tipo: e.audioTipo }); }
+      J().entrevistas.push(e); await guardar(); avisar('Respuestas guardadas.'); cerrarHoja();
+    };
+    $('rvNo').onclick = cerrarHoja;
+  }
+  // ---------- exportar ----------
+  // sin exportar: observaciones que no salieron y lugares nuevos o corregidos desde la última exportación (se guarda su huella)
+  function pendientes(s){ s = s || S; const ex = s.exportados || {}; return Object.keys(s.M.lugares).filter(k=> ex[k] !== relHuella(s.M.lugares[k])).concat(Object.keys(s.M.obs).filter(k=> !ex[k])); }
+  function hojaExportar(){
+    const n = pendientes().length;
+    const h = hoja(`<h2>Exportar relevamiento</h2><p class="nota">Arma un solo archivo con los puntos, las observaciones, la traza y las fotos, para pasarlo a la PC (WhatsApp, Drive o cable) e importarlo en el panel. Importarlo dos veces no duplica nada.</p>
+      <div class="fila"><button class="pri" id="rvNuevo">Solo lo nuevo (${n})</button><button id="rvTodo">Todo</button></div>
+      <div class="fila"><button id="rvCerrarJ">Cerrar la jornada de hoy</button></div><button id="rvCierra" style="width:100%">Volver</button>`, 'exportar');
+    $('rvNuevo').onclick = ()=> exportar(false); $('rvTodo').onclick = ()=> exportar(true);
+    $('rvCerrarJ').onclick = async ()=>{ J().fin = ahora(); await guardar(); if(pendientes().length && !confirm('Quedan cosas sin exportar: los datos del navegador del celular se pueden perder. ¿Cerrar la jornada igual? (Después podés exportar)')) return; nuevaJornada(); avisar('Jornada cerrada. La próxima salida empieza una nueva.'); cerrarHoja(); pantallaMapa(); };
+    $('rvCierra').onclick = cerrarHoja;
+  }
+  async function exportar(todo){
+    const ex = S.exportados, nuevo = k=> todo || (S.M.lugares[k] ? ex[k] !== relHuella(S.M.lugares[k]) : !ex[k]);
+    const lugares = Object.values(S.M.lugares).filter(l=> nuevo(l.uid)), obs = Object.values(S.M.obs).filter(o=> nuevo(o.uid) && o.jornada !== 'panel');
+    // los lugares de las observaciones nuevas viajan siempre (si el lugar vino del panel, no cambia nada al unir)
+    obs.forEach(o=>{ if(!lugares.some(l=> l.uid === o.lugar) && S.M.lugares[o.lugar]) lugares.push(S.M.lugares[o.lugar]); });
+    const jornadas = Object.values(S.M.jornadas).filter(j=> !j.previa).map(j=> { const c = Object.assign({}, j); delete c.previa; return c; });
+    const arch = [], fotos = [], te = new TextEncoder();
+    for(const o of obs) for(const fu of o.fotos){ const f = await kvGet('foto:' + fu); if(!f) continue; fotos.push({ uid: fu, lugar: f.lugar, obs: o.uid, ts: f.ts, w: f.w, h: f.h }); arch.push({ nombre: `fotos/${fu}.jpg`, datos: new Uint8Array(await f.blob.arrayBuffer()) }); }
+    for(const j of jornadas) for(const e of (j.entrevistas || [])){ if(!e.audio) continue; const a = await kvGet('audio:' + e.audio); if(a) arch.push({ nombre: `audios/${e.audio}`, datos: new Uint8Array(await a.blob.arrayBuffer()) }); }
+    const datos = { formato: 'escollera-relevamiento', version: REL_VERSION, zona: S.zid, zonaNombre: S.Z.zona.nombre, creado: ahora(), por: S.quien, todo, lugares, obs, jornadas, fotos };
+    arch.unshift({ nombre: 'relevamiento.json', datos: te.encode(JSON.stringify(datos)) });
+    const blob = relZip(arch), nombre = `relevamiento_${S.Z.zona.nombre.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').slice(0, 30)}_${ahora().replace(/[:T]/g, '-')}.zip`;
+    const file = new File([blob], nombre, { type: 'application/zip' });
+    let ok = false;
+    if(navigator.canShare && navigator.canShare({ files: [file] })){ try{ await navigator.share({ files: [file], title: 'Relevamiento' }); ok = true; }catch(e){ ok = false; } }
+    if(!ok){ const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=> URL.revokeObjectURL(u), 5000); }
+    lugares.forEach(l=> ex[l.uid] = relHuella(l)); obs.forEach(o=> ex[o.uid] = true); await guardar();
+    avisar(`Exportado: ${lugares.length} lugares, ${obs.length} observaciones y ${fotos.length} fotos.`); cerrarHoja(); pantallaMapa();
+  }
+  function menu(){
+    const h = hoja(`<h2>Menú</h2><div class="lista"><button id="rvCentrar">Centrar el mapa en la zona</button><button id="rvAqui">Ir a mi ubicación</button><button id="rvSalir">Volver al inicio</button><button id="rvBorrar">Borrar esta zona del teléfono</button></div><p class="nota">${Object.keys(S.M.lugares).length} lugares · ${Object.keys(S.M.obs).length} observaciones · ${pendientes().length} sin exportar · ${Object.values(S.M.jornadas).filter(j=> !j.previa).length} jornada(s) en este teléfono</p><button id="rvCierra" style="width:100%">Cerrar</button>`, 'menu');
+    $('rvCentrar').onclick = ()=>{ encuadrar(); cerrarHoja(); dibujar(); };
+    $('rvAqui').onclick = ()=>{ if(!S.pos) return avisar('Todavía no hay GPS.'); S.vista.x = S.pos.lon*KX - S.vista.w/2; S.vista.y = -S.pos.lat*KY - S.vista.h/2; cerrarHoja(); dibujar(); };
+    $('rvSalir').onclick = ()=>{ cerrarHoja(); if(S.watch != null) navigator.geolocation.clearWatch(S.watch); S.watch = null; arrancar(); };
+    $('rvBorrar').onclick = async ()=>{ if(pendientes().length && !confirm('Hay cosas sin exportar que se van a perder.')) return; if(!confirm('¿Borrar esta zona y todo lo relevado en este teléfono?')) return; for(const o of Object.values(S.M.obs)) for(const f of o.fotos) await kvDel('foto:' + f); for(const j of Object.values(S.M.jornadas)) for(const e of (j.entrevistas || [])) if(e.audio) await kvDel('audio:' + e.audio); await kvDel('sesion:' + S.zid); cerrarHoja(); arrancar(); };
+    $('rvCierra').onclick = cerrarHoja;
+  }
+  window.addEventListener('resize', ()=> dibujar());
+  arrancar();
+</script>
+</body>
+</html>

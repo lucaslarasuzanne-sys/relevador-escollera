@@ -1,0 +1,16 @@
+{
+ "name": "Relevador · Escollera Data",
+ "short_name": "Relevador",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#1f1e1a",
+ "theme_color": "#2B504C",
+ "icons": [
+  {
+   "src": "icono.svg",
+   "sizes": "any",
+   "type": "image/svg+xml"
+  }
+ ]
+}
